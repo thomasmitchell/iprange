@@ -4,7 +4,7 @@ A program that can check if a given IP in within an IP range. Does stuff that
 you can already do with `sipcalc`, but with an emphasis on simplicity and easier
 scriptability.
 
-```
+```text
  range <target> <minrange> <maxrange>
     Check if IP is between two other ips
 
@@ -13,6 +13,9 @@ scriptability.
 
   convert <range>
     Takes a CIDR and gives the min and max IP address in the range, newline separated
+
+  subtract <minuend> <subtrahend>
+    Subtract one CIDR from another and get the resulting range(s)
 ```
 
 ## Obtaining things and stuff

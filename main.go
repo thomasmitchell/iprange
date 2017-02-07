@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"os"
+	"reflect"
+	"strings"
 
 	"github.com/starkandwayne/goutils/ansi"
 
@@ -23,9 +25,40 @@ var (
 	cidrTarget = cidrCom.Arg("target", "IP to check if is within range").Required().IP()
 	cidrRange  = cidrCom.Arg("range", "CIDR notation for range to check").Required().String()
 
-	convertCom   = app.Command("convert", "Takes a CIDR and gives the min and max IP address in the range, newline separated")
+	convertCom   = app.Command("convert", "Takes a CIDR and gives the min and max IP address in the range")
 	convertRange = convertCom.Arg("range", "CIDR notation for range to convert").Required().String()
+
+	subtractCom   = app.Command("subtract", "Subtract one CIDR from another and get the resulting range(s)")
+	subMinuend    = subtractCom.Arg("minuend", "CIDR range from which to subtract").Required().String()
+	subSubtrahend = subtractCom.Arg("subtrahend", "CIDR to subtract from the minuend").Required().String()
+
+	optNewline = app.Flag("newline", "Print ranges as newline separated IPs").Short('n').Bool()
 )
+
+type netRange struct {
+	Min net.IP
+	Max net.IP
+}
+
+func netRangeFromInt(min, max int) netRange {
+	return netRange{
+		Min: toIP(min),
+		Max: toIP(max),
+	}
+}
+
+func (n netRange) String() string {
+	separator := " - "
+	if *optNewline {
+		separator = "\n"
+	}
+	return fmt.Sprintf("%s%s%s\n", n.Min, separator, n.Max)
+}
+
+//Returns true if min is less than or equal to max
+func (n netRange) Valid() bool {
+	return toNumber(n.Min) <= toNumber(n.Max)
+}
 
 func main() {
 	app.HelpFlag.Short('h')
@@ -38,6 +71,8 @@ func main() {
 		message, err = checkCIDR()
 	case "convert":
 		message, err = convertCIDR()
+	case "subtract":
+		message, err = subtractCIDR()
 	}
 
 	if err != nil {
@@ -101,5 +136,58 @@ func convertCIDR() (string, error) {
 	if err != nil {
 		return "Could not parse CIDR range", err
 	}
-	return fmt.Sprintf("%s\n%s", network.IP, getMaxCIDRIP(network)), nil
+	return fmt.Sprintf("%s", netRange{
+		Min: network.IP,
+		Max: getMaxCIDRIP(network)}), nil
+}
+
+//Currently overengineered, but may want to support non-CIDR ranges later...
+func subtractCIDR() (string, error) {
+	_, minuend, err := net.ParseCIDR(*subMinuend)
+	if err != nil {
+		return "Could not parse minuend CIDR", err
+	}
+	_, subtrahend, err := net.ParseCIDR(*subSubtrahend)
+	if err != nil {
+		return "Could not parse subtrahend CIDR", err
+	}
+
+	var overrideOrigRange bool
+	var difference []netRange
+	//Just terrible variable names
+	lowerMax := toNumber(subtrahend.IP) - 1
+	upperMin := toNumber(getMaxCIDRIP(subtrahend)) + 1
+	minuendMin := toNumber(minuend.IP)
+	minuendMax := toNumber(getMaxCIDRIP(minuend))
+
+	//Get left of subtrahend
+	if lowerMax < minuendMax {
+		leftRange := netRangeFromInt(minuendMin, lowerMax)
+		if leftRange.Valid() {
+			difference = append(difference, leftRange)
+			overrideOrigRange = true
+		}
+	}
+
+	//Get right of subtrahend
+	if upperMin > minuendMin {
+		rightRange := netRangeFromInt(upperMin, minuendMax)
+		if rightRange.Valid() {
+			difference = append(difference, rightRange)
+			overrideOrigRange = true
+		}
+	}
+
+	if !overrideOrigRange && !reflect.DeepEqual(minuend, subtrahend) {
+		difference = append(difference, netRangeFromInt(minuendMin, minuendMax))
+	}
+
+	var returnString string
+	//Create string from ranges
+	for _, r := range difference {
+		returnString = fmt.Sprintf("%s%s", returnString, r)
+	}
+
+	//Get right of subtrahend
+	return strings.TrimRight(returnString, "\n"), nil
 }
