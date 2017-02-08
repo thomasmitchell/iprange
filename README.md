@@ -11,8 +11,8 @@ scriptability.
   cidr <target> <range>
     Check if an ip is in a CIDR range
 
-  convert <range>
-    Takes a CIDR and gives the min and max IP address in the range, newline separated
+  convert <ranges>...
+    Takes one or more CIDRs and gives the min and max IP address in the range(s)
 
   subtract <minuend> <subtrahend>
     Subtract one CIDR from another and get the resulting range(s)

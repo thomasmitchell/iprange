@@ -25,8 +25,8 @@ var (
 	cidrTarget = cidrCom.Arg("target", "IP to check if is within range").Required().IP()
 	cidrRange  = cidrCom.Arg("range", "CIDR notation for range to check").Required().String()
 
-	convertCom   = app.Command("convert", "Takes a CIDR and gives the min and max IP address in the range")
-	convertRange = convertCom.Arg("range", "CIDR notation for range to convert").Required().String()
+	convertCom   = app.Command("convert", "Takes one or more CIDRs and gives the min and max IP address in the range(s)")
+	convertRange = convertCom.Arg("ranges", "CIDR notation for ranges to convert").Required().Strings()
 
 	subtractCom   = app.Command("subtract", "Subtract one CIDR from another and get the resulting range(s)")
 	subMinuend    = subtractCom.Arg("minuend", "CIDR range from which to subtract").Required().String()
@@ -132,13 +132,18 @@ func checkCIDR() (string, error) {
 }
 
 func convertCIDR() (string, error) {
-	_, network, err := net.ParseCIDR(*convertRange)
-	if err != nil {
-		return "Could not parse CIDR range", err
+	var retString string
+	for _, r := range *convertRange {
+		_, network, err := net.ParseCIDR(r)
+		if err != nil {
+			return "Could not parse CIDR range", err
+		}
+		retString = fmt.Sprintf("%s%s", retString, netRange{
+			Min: network.IP,
+			Max: getMaxCIDRIP(network),
+		})
 	}
-	return fmt.Sprintf("%s", netRange{
-		Min: network.IP,
-		Max: getMaxCIDRIP(network)}), nil
+	return strings.TrimRight(fmt.Sprintf("%s", retString), "\n"), nil
 }
 
 //Currently overengineered, but may want to support non-CIDR ranges later...
@@ -155,28 +160,38 @@ func subtractCIDR() (string, error) {
 	var overrideOrigRange bool
 	var difference []netRange
 	//Just terrible variable names
-	lowerMax := toNumber(subtrahend.IP) - 1
-	upperMin := toNumber(getMaxCIDRIP(subtrahend)) + 1
+	lowerMax := toNumber(subtrahend.IP)
+	upperMin := toNumber(getMaxCIDRIP(subtrahend))
 	minuendMin := toNumber(minuend.IP)
 	minuendMax := toNumber(getMaxCIDRIP(minuend))
 
 	//Get left of subtrahend
 	if lowerMax < minuendMax {
-		leftRange := netRangeFromInt(minuendMin, lowerMax)
+		if lowerMax == 0 { //0.0.0.0 ... avoid wraparound
+			overrideOrigRange = true
+			goto skipLeft
+		}
+		leftRange := netRangeFromInt(minuendMin, lowerMax-1)
 		if leftRange.Valid() {
 			difference = append(difference, leftRange)
 			overrideOrigRange = true
 		}
 	}
+skipLeft:
 
 	//Get right of subtrahend
 	if upperMin > minuendMin {
-		rightRange := netRangeFromInt(upperMin, minuendMax)
+		if upperMin == 4294967295 { //2^32 - 1, aka 255.255.255.255... avoid wraparound
+			overrideOrigRange = true
+			goto skipRight
+		}
+		rightRange := netRangeFromInt(upperMin+1, minuendMax)
 		if rightRange.Valid() {
 			difference = append(difference, rightRange)
 			overrideOrigRange = true
 		}
 	}
+skipRight:
 
 	if !overrideOrigRange && !reflect.DeepEqual(minuend, subtrahend) {
 		difference = append(difference, netRangeFromInt(minuendMin, minuendMax))
